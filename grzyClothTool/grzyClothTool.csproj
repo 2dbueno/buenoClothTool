@@ -6,15 +6,19 @@
 	  <UseWindowsForms>true</UseWindowsForms>
 	  <RuntimeIdentifier>win-x64</RuntimeIdentifier>
 	  <ApplicationIcon>Resources\grzyClothToolIcon.ico</ApplicationIcon>
-	  <FileVersion>1.2.1</FileVersion>
 	  
 	  <SelfContained>true</SelfContained>
 	  <PublishSingleFile>false</PublishSingleFile>
 	  <PublishReadyToRun>true</PublishReadyToRun>
 	  
 	  <PublishTrimmed>false</PublishTrimmed>
+	  
+	  <GeneratePackageOnBuild>False</GeneratePackageOnBuild>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)'=='Release'">
+	<Version>1.0.1</Version>
+	<FileVersion>1.0.1</FileVersion>
+	<AssemblyVersion>1.0.1.0</AssemblyVersion>
     <DebugSymbols>False</DebugSymbols>
     <DebugType>None</DebugType>
     <AllowedReferenceRelatedFileExtensions>*.pdb</AllowedReferenceRelatedFileExtensions>
