@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "buenoClothTool": {
+      "commandName": "Project",
+      "nativeDebugging": true
+    }
+  }
+}
