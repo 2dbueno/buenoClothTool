@@ -271,6 +271,7 @@ public static class FileHelper
 
     public static async Task<GDrawable> CreateDrawableAsync(string filePath, Enums.SexType sex, bool isProp, int typeNumber, int countOfType)
     {
+        // 1. Verifica se é reservado
         var isReserved = await IsReservedDrawable(filePath);
         if (isReserved)
         {
@@ -278,14 +279,16 @@ public static class FileHelper
         }
 
         var name = EnumHelper.GetName(typeNumber, isProp);
-
         var matchingTextures = FindMatchingTextures(filePath, name, isProp);
 
+        // 2. declaramos o GUID
         var drawableGuid = Guid.NewGuid();
+
+        // 3. calculamos se tem skin
         var drawableRaceSuffix = Path.GetFileNameWithoutExtension(filePath)[^1..];
         var drawableHasSkin = drawableRaceSuffix == "r";
 
-        // Copy drawable file to project assets and get relative path
+        // 4. copiamos o arquivo e definimos o path relativo
         string drawableRelativePath;
         try
         {
@@ -297,13 +300,13 @@ public static class FileHelper
             drawableRelativePath = filePath; // Fallback to original path
         }
 
-        // Copy texture files to project assets
+        // 5. processamos as texturas
         var texturesList = new List<(string relativePath, int txtNumber)>();
         for (int txtNumber = 0; txtNumber < Math.Min(matchingTextures.Count, GlobalConstants.MAX_DRAWABLE_TEXTURES); txtNumber++)
         {
             var texturePath = matchingTextures[txtNumber];
             var textureGuid = Guid.NewGuid();
-            
+
             try
             {
                 var textureRelativePath = await CopyToProjectAssetsAsync(texturePath, textureGuid.ToString());
@@ -312,16 +315,17 @@ public static class FileHelper
             catch (Exception ex)
             {
                 LogHelper.Log($"Failed to copy texture to project assets: {ex.Message}. Using original path.", LogType.Warning);
-                texturesList.Add((texturePath, txtNumber)); // Fallback to original path
+                texturesList.Add((texturePath, txtNumber));
             }
         }
 
-        // Create texture objects with relative paths
+        // 6. criamos a coleção de texturas
         var textures = new ObservableCollection<GTexture>(
             texturesList.Select(t => new GTexture(Guid.Empty, t.relativePath, typeNumber, countOfType, t.txtNumber, drawableHasSkin, isProp))
         );
 
-        return new GDrawable(drawableGuid, drawableRelativePath, sex, isProp, typeNumber, countOfType, drawableHasSkin, textures);
+        // 7. retornamos o objeto
+        return new GDrawable(drawableGuid, drawableRelativePath, sex, isProp, typeNumber, countOfType, drawableHasSkin, textures, filePath);
     }
 
     public static async Task CopyAsync(string sourcePath, string destinationPath)

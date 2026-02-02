@@ -55,7 +55,6 @@ namespace grzyClothTool.Models
         private static readonly Regex AlternateRegex = new(@"_\w_\d+\.ydd$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
         private static readonly Regex PhysicsRegex = new(@"\.yld$", RegexOptions.Compiled);
 
-        // Limite de processamento por lote
         private const int BATCH_SIZE = 40;
 
         public event PropertyChangedEventHandler PropertyChanged;
@@ -223,7 +222,6 @@ namespace grzyClothTool.Models
 
             await AddDrawables(mergedFiles, sex, ymt, dirPath, pedAltVariations);
 
-            // Limpeza forçada após carga pesada
             GC.Collect();
             GC.WaitForPendingFinalizers();
         }
@@ -308,11 +306,7 @@ namespace grzyClothTool.Models
                     if (Addons.Count == 0) CreateAddon();
                 });
 
-                // Agora verificamos na lista 'Addons' (já processados) E na 'pendingDrawables' (lote atual)
                 var drawablesOfType = new List<GDrawable>();
-
-                // Busca nos Addons (Thread-safe invoke não é estritamente necessário aqui se Addons for acessado com lock, 
-                // mas mantendo padrão da UI thread para segurança da ObservableCollection)
                 await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
                 {
                     foreach (var addon in Addons)
@@ -332,10 +326,7 @@ namespace grzyClothTool.Models
                             continue;
                         }
 
-                        // 1. Tenta achar nos Addons (já processados)
                         var foundDrawable = drawablesOfType.FirstOrDefault(x => x.Number == number);
-
-                        // 2. Se não achar, tenta achar no lote pendente atual
                         if (foundDrawable == null)
                         {
                             foundDrawable = pendingDrawables.FirstOrDefault(x =>
@@ -438,13 +429,9 @@ namespace grzyClothTool.Models
                 {
                     var key = (drawableType, isProp);
                     if (typeNumericCounts.TryGetValue(key, out int value))
-                    {
                         typeNumericCounts[key] = ++value;
-                    }
                     else
-                    {
                         typeNumericCounts[key] = 1;
-                    }
 
                     var ymtKey = (drawable.TypeNumeric, typeNumericCounts[(drawable.TypeNumeric, drawable.IsProp)] - 1);
                     if (compInfoDict.TryGetValue(ymtKey, out MCComponentInfo compInfo))
@@ -494,72 +481,25 @@ namespace grzyClothTool.Models
 
                 pendingDrawables.Add(drawable);
 
-                // Se acumulou 50 itens, processa agora para liberar memória da fila
                 if (pendingDrawables.Count >= BATCH_SIZE)
                 {
                     await ProcessBatchDuplicatesAndAdd(pendingDrawables);
                     pendingDrawables.Clear();
-
-                    // NÃO limpamos o pendingDrawableSourceNumbers aqui porque ele pode ser necessário
-                    // se um arquivo _1.ydd vier num chunk futuro. O dicionário é leve (int),
-                    // diferente da lista de objetos pesados (GDrawable).
                 }
             }
         }
 
         private async Task ProcessBatchDuplicatesAndAdd(List<GDrawable> drawables)
         {
-            var duplicatesDict = DuplicateDetector.CheckDrawableDuplicatesBatch(drawables);
-
-            var drawablesWithDuplicates = drawables.Where(d => duplicatesDict.ContainsKey(d)).ToList();
-            var drawablesWithoutDuplicates = drawables.Where(d => !duplicatesDict.ContainsKey(d)).ToList();
-
-            foreach (var drawable in drawablesWithoutDuplicates)
+            // Simplesmente adicionamos tudo. 
+            // O DuplicateDetector registrará as duplicatas internamente ao chamar AddDrawableInternal.
+            // O usuário gerencia isso depois na tela de Duplicate Inspector.
+            foreach (var drawable in drawables)
             {
                 await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
                 {
                     AddDrawableInternal(drawable);
                 });
-            }
-
-            if (drawablesWithDuplicates.Count > 0)
-            {
-                var batchItems = drawablesWithDuplicates
-                    .Select(d => new DuplicateBatchItem
-                    {
-                        Drawable = d,
-                        ExistingDuplicates = duplicatesDict[d]
-                    })
-                    .ToList();
-
-                DuplicateBatchResult result = null;
-                await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
-                {
-                    result = DuplicateBatchDialog.Show(batchItems);
-                });
-
-                if (result != null && !result.Cancelled)
-                {
-                    foreach (var drawable in result.DrawablesToAdd)
-                    {
-                        await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
-                        {
-                            AddDrawableInternal(drawable);
-                        });
-                    }
-
-                    foreach (var drawable in result.DrawablesToSkip)
-                    {
-                        LogHelper.Log($"Drawable '{Path.GetFileName(drawable.FilePath)}' was not added (user skipped duplicate)", Views.LogType.Info);
-                    }
-                }
-                else if (result?.Cancelled == true)
-                {
-                    foreach (var drawable in drawablesWithDuplicates)
-                    {
-                        LogHelper.Log($"Drawable '{Path.GetFileName(drawable.FilePath)}' was not added (user cancelled duplicate batch)", Views.LogType.Info);
-                    }
-                }
             }
 
             await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
@@ -568,11 +508,6 @@ namespace grzyClothTool.Models
             });
         }
 
-
-        /// <summary>
-        /// Extracts group path from file path relative to base path
-        /// Expected structure for FiveM: basePath/stream/[gender]/[group]/[type]/file.ydd
-        /// </summary>
         private static string ExtractGroupFromPath(string filePath, string basePath, Enums.SexType sex, bool isProp)
         {
             try
@@ -584,7 +519,6 @@ namespace grzyClothTool.Models
 
                 var parts = relativePath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
-                // Expected structure: stream/[gender]/[group(s)]/[type]
                 if (parts.Length > 3)
                 {
                     int genderIndex = -1;
@@ -621,32 +555,10 @@ namespace grzyClothTool.Models
         {
             lock (AddonsLock)
             {
-                var existingDuplicates = DuplicateDetector.CheckDrawableDuplicate(drawable);
-                if (existingDuplicates != null && existingDuplicates.Count > 0)
-                {
-                    var duplicateNames = string.Join("\n", existingDuplicates.Select(d => $"  • {d.Name} (Addon: {Addons.FirstOrDefault(a => a.Drawables.Contains(d))?.Name ?? "Unknown"})"));
-                    var message = $"A duplicate drawable has been detected!\n\nThe drawable you're trying to add appears to be identical to:\n{duplicateNames}\n\nThis new drawable will be added but marked as a duplicate.\n\nDo you want to continue?";
-
-                    var result = System.Windows.Application.Current.Dispatcher.Invoke(() =>
-                        Controls.CustomMessageBox.Show(message, "Duplicate Drawable Detected",
-                            Controls.CustomMessageBox.CustomMessageBoxButtons.OKCancel,
-                            Controls.CustomMessageBox.CustomMessageBoxIcon.Warning));
-
-                    if (result == Controls.CustomMessageBox.CustomMessageBoxResult.Cancel)
-                    {
-                        LogHelper.Log($"Drawable '{Path.GetFileName(drawable.FilePath)}' was not added (user cancelled duplicate)", Views.LogType.Info);
-                        return;
-                    }
-                }
-
                 AddDrawableInternal(drawable);
             }
         }
 
-        /// <summary>
-        /// Internal method to add a drawable without duplicate checking.
-        /// Used by batch processing after duplicates have already been handled.
-        /// </summary>
         private void AddDrawableInternal(GDrawable drawable)
         {
             lock (AddonsLock)
@@ -655,13 +567,11 @@ namespace grzyClothTool.Models
                 int currentAddonIndex = 0;
                 Addon currentAddon;
 
-                // find to which addon we should add the drawable
                 while (currentAddonIndex < Addons.Count)
                 {
                     currentAddon = Addons[currentAddonIndex];
                     int countOfType = currentAddon.Drawables.Count(x => x.TypeNumeric == drawable.TypeNumeric && x.IsProp == drawable.IsProp && x.Sex == drawable.Sex);
 
-                    // If the number of drawables of this type has reached 128, move to the next addon
                     if (countOfType >= GlobalConstants.MAX_DRAWABLES_IN_ADDON)
                     {
                         currentAddonIndex++;
@@ -672,27 +582,23 @@ namespace grzyClothTool.Models
                     break;
                 }
 
-                // make sure we are adding to correct addon
                 if (currentAddonIndex < Addons.Count)
                 {
                     currentAddon = Addons[currentAddonIndex];
                 }
                 else
                 {
-                    // Create a new Addon
                     currentAddon = new Addon("Addon " + (currentAddonIndex + 1));
                     Addons.Add(currentAddon);
                 }
 
-                // Update name and number
-                // mark as new, to make it easier to find
                 drawable.IsNew = true;
                 drawable.Number = nextNumber;
                 drawable.SetDrawableName();
 
                 currentAddon.Drawables.Add(drawable);
 
-                DuplicateDetector.RegisterDrawable(drawable);
+                DuplicateDetector.RegisterDrawable(drawable); // Isso marca a duplicata no sistema para ver depois
                 SaveHelper.SetUnsavedChanges(true);
             }
         }
@@ -701,12 +607,10 @@ namespace grzyClothTool.Models
         {
             SaveHelper.SetUnsavedChanges(true);
 
-            // CORREÇÃO: Usar .ToList() para evitar erro de enumeração modificada
             foreach (GDrawable drawable in drawables.ToList())
             {
                 DuplicateDetector.UnregisterDrawable(drawable);
 
-                // CORREÇÃO: Encontra o Addon correto
                 var ownerAddon = Addons.FirstOrDefault(a => a.Drawables.Contains(drawable));
 
                 if (ownerAddon != null)
@@ -749,7 +653,6 @@ namespace grzyClothTool.Models
                 }
                 else if (ownerAddon != null)
                 {
-                    // Nota: Ordenar a cada item pode ser lento em batch, mas é o comportamento original
                     ownerAddon.Drawables.Sort(true);
                 }
             }
@@ -788,7 +691,7 @@ namespace grzyClothTool.Models
             }
 
             int index = Addons.IndexOf(addon);
-            if (index < 0) { return; } // if not found, don't remove
+            if (index < 0) { return; }
 
             Addons.RemoveAt(index);
             AdjustAddonNames();
@@ -803,7 +706,6 @@ namespace grzyClothTool.Models
 
             OnPropertyChanged("Addons");
         }
-
 
         protected void OnPropertyChanged([CallerMemberName] string name = null)
         {
