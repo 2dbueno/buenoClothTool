@@ -159,12 +159,16 @@ public class GTexture : INotifyPropertyChanged
         DisplayName = GetBuildName();
     }
 
-    // NOVO MÉTODO: Só chama isso quando o user clicar
+    // Método EnsureDetailsLoaded com Dispatcher para forçar atualização da UI
     public async Task EnsureDetailsLoaded()
     {
-        if (DetailsLoaded || IsLoading) return; // Já carregou ou está carregando? Sai.
+        if (DetailsLoaded || IsLoading) return;
 
-        IsLoading = true;
+        // Avisa a UI que começou a carregar (na Thread Principal)
+        Application.Current.Dispatcher.Invoke(() =>
+        {
+            IsLoading = true;
+        });
 
         try
         {
@@ -172,29 +176,45 @@ public class GTexture : INotifyPropertyChanged
             {
                 var result = await LoadTextureDetailsWithConcurrencyControl(FullFilePath);
 
-                if (result != null)
+                // Volta para a Thread Principal para atualizar os dados visuais
+                await Application.Current.Dispatcher.InvokeAsync(() =>
                 {
-                    TxtDetails = result;
-                    OnPropertyChanged(nameof(TxtDetails));
-                    TxtDetails.Validate();
-                }
-                else
-                {
-                    IsPreviewDisabled = true;
-                }
+                    if (result != null)
+                    {
+                        TxtDetails = result;
+                        TxtDetails.Validate();
+
+                        // Notifica a mudança de TODAS as propriedades relevantes
+                        OnPropertyChanged(nameof(TxtDetails));
+                        OnPropertyChanged(nameof(OptimizeDetails));
+                        OnPropertyChanged(nameof(IsOptimizedDuringBuild));
+                    }
+                    else
+                    {
+                        IsPreviewDisabled = true;
+                        OnPropertyChanged(nameof(IsPreviewDisabled));
+                    }
+                });
             }
         }
         catch (Exception ex)
         {
             LogHelper.Log($"Could not load texture details '{DisplayName}': {ex.Message}", Views.LogType.Warning);
-            IsPreviewDisabled = true;
+            Application.Current.Dispatcher.Invoke(() => IsPreviewDisabled = true);
         }
         finally
         {
-            IsLoading = false;
-            DetailsLoaded = true;
-            // Carrega o thumbnail junto com os detalhes, ou separe se quiser ainda mais performance
-            LoadThumbnailAsync();
+            // Garante que o loading termine e o thumbnail inicie na Thread Principal
+            await Application.Current.Dispatcher.InvokeAsync(() =>
+            {
+                IsLoading = false;
+                DetailsLoaded = true;
+
+                // Força um "refresh" final para garantir que o ícone preto suma e o amarelo apareça
+                OnPropertyChanged(nameof(IsLoading));
+
+                LoadThumbnailAsync();
+            });
         }
     }
 

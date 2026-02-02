@@ -645,14 +645,29 @@ public class GDrawable : INotifyPropertyChanged
 
     private void OnTexturePropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(GTexture.TxtDetails) && Details != null)
+        // Se os detalhes da textura mudarem (carregou do disco)
+        if (e.PropertyName == nameof(GTexture.TxtDetails))
         {
-            Details.Validate(Textures);
-            OnPropertyChanged(nameof(HasTexturesNeedingOptimization));
+            if (Details != null)
+            {
+                // Revalida o Drawable inteiro (checa se a nova textura gera warning)
+                Details.Validate(Textures);
+
+                // Avisa a UI que o status de Warning pode ter mudado
+                OnPropertyChanged(nameof(HasTexturesNeedingOptimization));
+
+                // Força atualização da propriedade Details para redesenhar ícones se necessário
+                OnPropertyChanged(nameof(Details));
+            }
         }
-        
+
+        // Se a opção de otimizar mudou
         if (e.PropertyName == nameof(GTexture.IsOptimizedDuringBuild))
         {
+            if (Details != null)
+            {
+                Details.Validate(Textures);
+            }
             OnPropertyChanged(nameof(HasTexturesNeedingOptimization));
         }
     }
