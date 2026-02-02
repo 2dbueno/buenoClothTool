@@ -21,14 +21,12 @@ using System.Xml.Linq;
 
 namespace grzyClothTool.Models
 {
-
     public class AddonManagerDesign : AddonManager
     {
         public AddonManagerDesign()
         {
             ProjectName = "Design";
             Addons = [];
-
             Addons.Add(new Addon("design"));
             SelectedAddon = Addons.First();
         }
@@ -57,6 +55,8 @@ namespace grzyClothTool.Models
         private static readonly Regex AlternateRegex = new(@"_\w_\d+\.ydd$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
         private static readonly Regex PhysicsRegex = new(@"\.yld$", RegexOptions.Compiled);
 
+        private const int BATCH_SIZE = 40;
+
         public event PropertyChangedEventHandler PropertyChanged;
 
         public string ProjectName { get; set; }
@@ -68,7 +68,7 @@ namespace grzyClothTool.Models
 
         public ObservableCollection<string> Groups { get; set; } = [];
         public ObservableCollection<string> Tags { get; set; } = [];
-        
+
         [JsonIgnore]
         public ObservableCollection<MoveMenuItem> MoveMenuItems { get; set; } = [];
 
@@ -121,7 +121,6 @@ namespace grzyClothTool.Models
         public void CreateAddon()
         {
             var name = "Addon " + (Addons.Count + 1);
-
             Addons.Add(new Addon(name));
             OnPropertyChanged("Addons");
         }
@@ -130,21 +129,15 @@ namespace grzyClothTool.Models
         {
             try
             {
-                var pedAltVariationsFiles = await Task.Run(() => 
+                var pedAltVariationsFiles = await Task.Run(() =>
                     Directory.GetFiles(dirPath, "pedalternativevariations*.meta", SearchOption.AllDirectories)
                         .Where(x => x.Contains(addonName))
                         .ToArray());
 
-                if (pedAltVariationsFiles.Length == 0)
-                {
-                    return null;
-                }
+                if (pedAltVariationsFiles.Length == 0) return null;
 
                 var pedAltVariationsFile = pedAltVariationsFiles.FirstOrDefault();
-                if (pedAltVariationsFile == null)
-                {
-                    return null;
-                }
+                if (pedAltVariationsFile == null) return null;
 
                 var xmlDoc = await Task.Run(() => XDocument.Load(pedAltVariationsFile));
                 return PedAlternativeVariations.FromXml(xmlDoc);
@@ -161,10 +154,8 @@ namespace grzyClothTool.Models
             var dirPath = Path.GetDirectoryName(path);
             var addonName = Path.GetFileNameWithoutExtension(path);
 
-            // Determine if the addonName indicates male or female
             Enums.SexType sex = addonName.Contains("mp_m_freemode_01") ? Enums.SexType.male : Enums.SexType.female;
 
-            // Build the appropriate regex pattern based on whether it's male or female
             string genderSpecificPart = sex == Enums.SexType.male ? "mp_m_freemode_01" : "mp_f_freemode_01";
             string addonNameWithoutGender = addonName.Replace(genderSpecificPart, "").TrimStart('_');
 
@@ -179,7 +170,7 @@ namespace grzyClothTool.Models
                 var compiledPattern = new Regex(pattern, RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
                 var allFiles = Directory.GetFiles(dirPath, "*.*", SearchOption.AllDirectories);
-                
+
                 var ydds = allFiles
                     .Where(f => f.EndsWith(".ydd", StringComparison.OrdinalIgnoreCase))
                     .Where(f => compiledPattern.IsMatch(Path.GetFileName(f)))
@@ -224,27 +215,25 @@ namespace grzyClothTool.Models
             var ymt = new PedFile();
             var ymtBytes = await FileHelper.ReadAllBytesAsync(ymtFile);
             RpfFile.LoadResourceFile(ymt, ymtBytes, 2);
-            
+
             var pedAltVariations = await LoadPedAlternativeVariationsFileAsync(dirPath, addonNameWithoutGender);
-            
-            //merge ydd with yld files
+
             var mergedFiles = yddFiles.Concat(yldFiles).ToArray();
 
             await AddDrawables(mergedFiles, sex, ymt, dirPath, pedAltVariations);
+
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
         }
 
         public Task AddDrawables(string[] filePaths, Enums.SexType sex, PedFile ymt = null, string basePath = null, PedAlternativeVariations pedAltVariations = null)
         {
             var tcs = new TaskCompletionSource();
 
-            // We need to count how many drawables of each type we have added so far
-            // this is because if we are loading from ymt file, numbers are relative to this ymt file, once adding it to existing project
-            // we need to adjust numbers to get proper properties
             Dictionary<(int, bool), int> typeNumericCounts = [];
-
-            //read properties from provided ymt file if there is any
             Dictionary<(int, int), MCComponentInfo> compInfoDict = [];
             Dictionary<(int, int), MCPedPropMetaData> pedPropMetaDataDict = [];
+
             if (ymt is not null)
             {
                 var hasCompInfos = ymt.VariationInfo.CompInfos != null;
@@ -291,7 +280,7 @@ namespace grzyClothTool.Models
         {
             var pendingDrawables = new List<GDrawable>();
             var pendingDrawableSourceNumbers = new Dictionary<GDrawable, int>();
-            
+
             foreach (var workItem in _drawableQueue.GetConsumingEnumerable())
             {
                 if (workItem is CompletionMarker marker)
@@ -302,7 +291,7 @@ namespace grzyClothTool.Models
                         pendingDrawables.Clear();
                         pendingDrawableSourceNumbers.Clear();
                     }
-                    
+
                     marker.Tcs.SetResult();
                     continue;
                 }
@@ -310,17 +299,11 @@ namespace grzyClothTool.Models
                 var (filePath, sex, basePath, ymt, pedAltVariations, compInfoDict, pedPropMetaDataDict, typeNumericCounts) = (DrawableWorkItem)workItem;
 
                 var (isProp, drawableType) = await FileHelper.ResolveDrawableType(filePath);
-                if (drawableType == -1)
-                {
-                    continue;
-                }
+                if (drawableType == -1) continue;
 
                 await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
                 {
-                    if (Addons.Count == 0)
-                    {
-                        CreateAddon();
-                    }
+                    if (Addons.Count == 0) CreateAddon();
                 });
 
                 var drawablesOfType = new List<GDrawable>();
@@ -346,14 +329,14 @@ namespace grzyClothTool.Models
                         var foundDrawable = drawablesOfType.FirstOrDefault(x => x.Number == number);
                         if (foundDrawable == null)
                         {
-                            foundDrawable = pendingDrawables.FirstOrDefault(x => 
-                                x.TypeNumeric == drawableType && 
-                                x.IsProp == isProp && 
-                                x.Sex == sex && 
-                                pendingDrawableSourceNumbers.TryGetValue(x, out var srcNum) && 
+                            foundDrawable = pendingDrawables.FirstOrDefault(x =>
+                                x.TypeNumeric == drawableType &&
+                                x.IsProp == isProp &&
+                                x.Sex == sex &&
+                                pendingDrawableSourceNumbers.TryGetValue(x, out var srcNum) &&
                                 srcNum == number);
                         }
-                        
+
                         if (foundDrawable != null)
                         {
                             try
@@ -388,13 +371,14 @@ namespace grzyClothTool.Models
                     var foundDrawable = drawablesOfType.FirstOrDefault(x => x.Number == number);
                     if (foundDrawable == null)
                     {
-                        foundDrawable = pendingDrawables.FirstOrDefault(x => 
-                            x.TypeNumeric == drawableType && 
-                            x.IsProp == isProp && 
-                            x.Sex == sex && 
-                            pendingDrawableSourceNumbers.TryGetValue(x, out var srcNum) && 
+                        foundDrawable = pendingDrawables.FirstOrDefault(x =>
+                            x.TypeNumeric == drawableType &&
+                            x.IsProp == isProp &&
+                            x.Sex == sex &&
+                            pendingDrawableSourceNumbers.TryGetValue(x, out var srcNum) &&
                             srcNum == number);
                     }
+
                     if (foundDrawable != null)
                     {
                         try
@@ -416,14 +400,14 @@ namespace grzyClothTool.Models
                     continue;
                 }
 
-                var drawable = await FileHelper.CreateDrawableAsync(filePath, sex, isProp, drawableType, 0); // Number is set by AddDrawable
-                
+                var drawable = await FileHelper.CreateDrawableAsync(filePath, sex, isProp, drawableType, 0);
+
                 var sourceNumber = FileHelper.GetDrawableNumberFromFileName(Path.GetFileName(filePath));
                 if (sourceNumber.HasValue)
                 {
                     pendingDrawableSourceNumbers[drawable] = sourceNumber.Value;
                 }
-                
+
                 if (!string.IsNullOrEmpty(basePath) && filePath.StartsWith(basePath))
                 {
                     var extractedGroup = ExtractGroupFromPath(filePath, basePath, sex, isProp);
@@ -445,13 +429,9 @@ namespace grzyClothTool.Models
                 {
                     var key = (drawableType, isProp);
                     if (typeNumericCounts.TryGetValue(key, out int value))
-                    {
                         typeNumericCounts[key] = ++value;
-                    }
                     else
-                    {
                         typeNumericCounts[key] = 1;
-                    }
 
                     var ymtKey = (drawable.TypeNumeric, typeNumericCounts[(drawable.TypeNumeric, drawable.IsProp)] - 1);
                     if (compInfoDict.TryGetValue(ymtKey, out MCComponentInfo compInfo))
@@ -500,62 +480,26 @@ namespace grzyClothTool.Models
                 }
 
                 pendingDrawables.Add(drawable);
+
+                if (pendingDrawables.Count >= BATCH_SIZE)
+                {
+                    await ProcessBatchDuplicatesAndAdd(pendingDrawables);
+                    pendingDrawables.Clear();
+                }
             }
         }
 
         private async Task ProcessBatchDuplicatesAndAdd(List<GDrawable> drawables)
         {
-            var duplicatesDict = DuplicateDetector.CheckDrawableDuplicatesBatch(drawables);
-            
-            var drawablesWithDuplicates = drawables.Where(d => duplicatesDict.ContainsKey(d)).ToList();
-            var drawablesWithoutDuplicates = drawables.Where(d => !duplicatesDict.ContainsKey(d)).ToList();
-            
-            foreach (var drawable in drawablesWithoutDuplicates)
+            // Simplesmente adicionamos tudo. 
+            // O DuplicateDetector registrará as duplicatas internamente ao chamar AddDrawableInternal.
+            // O usuário gerencia isso depois na tela de Duplicate Inspector.
+            foreach (var drawable in drawables)
             {
                 await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
                 {
                     AddDrawableInternal(drawable);
                 });
-            }
-            
-            if (drawablesWithDuplicates.Count > 0)
-            {
-                var batchItems = drawablesWithDuplicates
-                    .Select(d => new DuplicateBatchItem
-                    {
-                        Drawable = d,
-                        ExistingDuplicates = duplicatesDict[d]
-                    })
-                    .ToList();
-
-                DuplicateBatchResult result = null;
-                await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
-                {
-                    result = DuplicateBatchDialog.Show(batchItems);
-                });
-
-                if (result != null && !result.Cancelled)
-                {
-                    foreach (var drawable in result.DrawablesToAdd)
-                    {
-                        await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
-                        {
-                            AddDrawableInternal(drawable);
-                        });
-                    }
-
-                    foreach (var drawable in result.DrawablesToSkip)
-                    {
-                        LogHelper.Log($"Drawable '{Path.GetFileName(drawable.FilePath)}' was not added (user skipped duplicate)", Views.LogType.Info);
-                    }
-                }
-                else if (result?.Cancelled == true)
-                {
-                    foreach (var drawable in drawablesWithDuplicates)
-                    {
-                        LogHelper.Log($"Drawable '{Path.GetFileName(drawable.FilePath)}' was not added (user cancelled duplicate batch)", Views.LogType.Info);
-                    }
-                }
             }
 
             await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
@@ -564,11 +508,6 @@ namespace grzyClothTool.Models
             });
         }
 
-
-        /// <summary>
-        /// Extracts group path from file path relative to base path
-        /// Expected structure for FiveM: basePath/stream/[gender]/[group]/[type]/file.ydd
-        /// </summary>
         private static string ExtractGroupFromPath(string filePath, string basePath, Enums.SexType sex, bool isProp)
         {
             try
@@ -577,15 +516,14 @@ namespace grzyClothTool.Models
                 basePath = Path.GetFullPath(basePath);
 
                 var relativePath = Path.GetRelativePath(basePath, Path.GetDirectoryName(filePath));
-                
+
                 var parts = relativePath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                
-                // Expected structure: stream/[gender]/[group(s)]/[type]
+
                 if (parts.Length > 3)
                 {
                     int genderIndex = -1;
                     string expectedGenderFolder = sex == Enums.SexType.male ? "[male]" : "[female]";
-                    
+
                     for (int i = 0; i < parts.Length; i++)
                     {
                         if (parts[i].Equals(expectedGenderFolder, StringComparison.OrdinalIgnoreCase))
@@ -594,7 +532,7 @@ namespace grzyClothTool.Models
                             break;
                         }
                     }
-                    
+
                     if (genderIndex >= 0 && genderIndex < parts.Length - 2)
                     {
                         var groupParts = parts.Skip(genderIndex + 1).Take(parts.Length - genderIndex - 2).ToArray();
@@ -609,7 +547,7 @@ namespace grzyClothTool.Models
             {
                 LogHelper.Log($"Error extracting group from path: {ex.Message}", Views.LogType.Warning);
             }
-            
+
             return null;
         }
 
@@ -617,32 +555,10 @@ namespace grzyClothTool.Models
         {
             lock (AddonsLock)
             {
-                var existingDuplicates = DuplicateDetector.CheckDrawableDuplicate(drawable);
-                if (existingDuplicates != null && existingDuplicates.Count > 0)
-                {
-                    var duplicateNames = string.Join("\n", existingDuplicates.Select(d => $"  • {d.Name} (Addon: {Addons.FirstOrDefault(a => a.Drawables.Contains(d))?.Name ?? "Unknown"})"));
-                    var message = $"A duplicate drawable has been detected!\n\nThe drawable you're trying to add appears to be identical to:\n{duplicateNames}\n\nThis new drawable will be added but marked as a duplicate.\n\nDo you want to continue?";
-                    
-                    var result = System.Windows.Application.Current.Dispatcher.Invoke(() =>
-                        Controls.CustomMessageBox.Show(message, "Duplicate Drawable Detected", 
-                            Controls.CustomMessageBox.CustomMessageBoxButtons.OKCancel, 
-                            Controls.CustomMessageBox.CustomMessageBoxIcon.Warning));
-                    
-                    if (result == Controls.CustomMessageBox.CustomMessageBoxResult.Cancel)
-                    {
-                        LogHelper.Log($"Drawable '{Path.GetFileName(drawable.FilePath)}' was not added (user cancelled duplicate)", Views.LogType.Info);
-                        return;
-                    }
-                }
-
                 AddDrawableInternal(drawable);
             }
         }
 
-        /// <summary>
-        /// Internal method to add a drawable without duplicate checking.
-        /// Used by batch processing after duplicates have already been handled.
-        /// </summary>
         private void AddDrawableInternal(GDrawable drawable)
         {
             lock (AddonsLock)
@@ -651,13 +567,11 @@ namespace grzyClothTool.Models
                 int currentAddonIndex = 0;
                 Addon currentAddon;
 
-                // find to which addon we should add the drawable
                 while (currentAddonIndex < Addons.Count)
                 {
                     currentAddon = Addons[currentAddonIndex];
                     int countOfType = currentAddon.Drawables.Count(x => x.TypeNumeric == drawable.TypeNumeric && x.IsProp == drawable.IsProp && x.Sex == drawable.Sex);
 
-                    // If the number of drawables of this type has reached 128, move to the next addon
                     if (countOfType >= GlobalConstants.MAX_DRAWABLES_IN_ADDON)
                     {
                         currentAddonIndex++;
@@ -668,27 +582,23 @@ namespace grzyClothTool.Models
                     break;
                 }
 
-                // make sure we are adding to correct addon
                 if (currentAddonIndex < Addons.Count)
                 {
                     currentAddon = Addons[currentAddonIndex];
                 }
                 else
                 {
-                    // Create a new Addon
                     currentAddon = new Addon("Addon " + (currentAddonIndex + 1));
                     Addons.Add(currentAddon);
                 }
 
-                // Update name and number
-                // mark as new, to make it easier to find
                 drawable.IsNew = true;
                 drawable.Number = nextNumber;
                 drawable.SetDrawableName();
 
                 currentAddon.Drawables.Add(drawable);
 
-                DuplicateDetector.RegisterDrawable(drawable);
+                DuplicateDetector.RegisterDrawable(drawable); // Isso marca a duplicata no sistema para ver depois
                 SaveHelper.SetUnsavedChanges(true);
             }
         }
@@ -697,22 +607,19 @@ namespace grzyClothTool.Models
         {
             SaveHelper.SetUnsavedChanges(true);
 
-            foreach (GDrawable drawable in drawables)
+            foreach (GDrawable drawable in drawables.ToList())
             {
                 DuplicateDetector.UnregisterDrawable(drawable);
 
-                // CORREÇÃO: Encontra o Addon que realmente contém este drawable
                 var ownerAddon = Addons.FirstOrDefault(a => a.Drawables.Contains(drawable));
 
                 if (ownerAddon != null)
                 {
-                    ownerAddon.Drawables.Remove(drawable); // Remove da lista correta na memória
+                    ownerAddon.Drawables.Remove(drawable);
                 }
                 else
                 {
                     LogHelper.Log($"Warning: Tried to delete drawable '{drawable.Name}' but it was not found in any active Addon list.", Views.LogType.Warning);
-                    // Mesmo se não achar na lista, continuamos para tentar apagar o arquivo físico abaixo, 
-                    // caso seja um arquivo órfão, mas o log acima vai ajudar a debugar.
                 }
 
                 if (SettingsHelper.Instance.AutoDeleteFiles)
@@ -740,7 +647,6 @@ namespace grzyClothTool.Models
                     }
                 }
 
-                // Se o addon ficou vazio após a remoção, removemos o addon
                 if (ownerAddon != null && ownerAddon.Drawables.Count == 0)
                 {
                     DeleteAddon(ownerAddon);
@@ -785,7 +691,7 @@ namespace grzyClothTool.Models
             }
 
             int index = Addons.IndexOf(addon);
-            if (index < 0) { return; } // if not found, don't remove
+            if (index < 0) { return; }
 
             Addons.RemoveAt(index);
             AdjustAddonNames();
@@ -800,7 +706,6 @@ namespace grzyClothTool.Models
 
             OnPropertyChanged("Addons");
         }
-
 
         protected void OnPropertyChanged([CallerMemberName] string name = null)
         {

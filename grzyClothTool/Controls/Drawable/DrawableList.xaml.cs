@@ -422,6 +422,31 @@ namespace grzyClothTool.Controls
             }
         }
 
+        private void OpenSourceFolder_Click(object sender, RoutedEventArgs e)
+        {
+            if (MyListBox.SelectedItem is GDrawable drawable && !string.IsNullOrEmpty(drawable.OriginalFilePath))
+            {
+                if (System.IO.File.Exists(drawable.OriginalFilePath))
+                {
+                    // Abre o explorer selecionando o arquivo
+                    System.Diagnostics.Process.Start("explorer.exe", $"/select, \"{drawable.OriginalFilePath}\"");
+                }
+                else
+                {
+                    // Se o arquivo não existe mais, tenta abrir a pasta
+                    var dir = System.IO.Path.GetDirectoryName(drawable.OriginalFilePath);
+                    if (System.IO.Directory.Exists(dir))
+                    {
+                        System.Diagnostics.Process.Start("explorer.exe", dir);
+                    }
+                    else
+                    {
+                        MessageBox.Show("Source folder no longer exists.", "Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    }
+                }
+            }
+        }
+
         private void OpenFileLocation_Click(object sender, RoutedEventArgs e)
         {
             var drawable = DrawableListSelectedValue as GDrawable;

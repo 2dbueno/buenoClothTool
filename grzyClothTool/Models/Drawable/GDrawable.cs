@@ -55,6 +55,21 @@ public class GDrawable : INotifyPropertyChanged
     [JsonIgnore]
     public string FullFilePath => FileHelper.ResolveFilePath(_filePath);
 
+    private string _originalFilePath;
+    [JsonInclude]
+    public string OriginalFilePath
+    {
+        get => _originalFilePath;
+        set
+        {
+            if (_originalFilePath != value)
+            {
+                _originalFilePath = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
     private bool _isNew;
     public bool IsNew
     {
@@ -445,7 +460,7 @@ public class GDrawable : INotifyPropertyChanged
         }
     }
 
-    public GDrawable(Guid id, string filePath, Enums.SexType sex, bool isProp, int typeNumeric, int number, bool hasSkin, ObservableCollection<GTexture> textures)
+    public GDrawable(Guid id, string filePath, Enums.SexType sex, bool isProp, int typeNumeric, int number, bool hasSkin, ObservableCollection<GTexture> textures, string originalFilePath = null)
     {
         IsLoading = true;
 
@@ -460,7 +475,8 @@ public class GDrawable : INotifyPropertyChanged
         FilePath = filePath;
         Textures = textures;
         Textures.CollectionChanged += OnTexturesCollectionChanged;
-        
+        OriginalFilePath = originalFilePath ?? filePath;
+
         foreach (var texture in Textures)
         {
             texture.PropertyChanged += OnTexturePropertyChanged;
