@@ -394,31 +394,38 @@ namespace buenoClothTool.Controls
             }
         }
 
+        private List<GDrawable> GetSelectedDrawables()
+        {
+            // Pega todos os itens selecionados (Batch)
+            return MyListBox.SelectedItems.Cast<GDrawable>().ToList();
+        }
+
         private void MoveMenuItem_Click(object sender, RoutedEventArgs e)
         {
             MenuItem menuItem = sender as MenuItem;
             if (menuItem?.Header is string addonName)
             {
-                var selectedDrawables = MainWindow.AddonManager.SelectedAddon.SelectedDrawables.ToList();
+                var selectedDrawables = GetSelectedDrawables(); // Usa o novo método
+                if (selectedDrawables.Count == 0) return;
+
                 var addon = MainWindow.AddonManager.Addons.FirstOrDefault(a => a.Name == addonName);
+                if (addon == null) return;
 
-                if (addon == null)
-                {
-                    return;
-                }
-
+                // Verifica se cabe tudo
                 if (!addon.CanFitDrawables(selectedDrawables))
                 {
                     Show("The selected addon cannot fit the selected drawables.", "Addon full", CustomMessageBoxButtons.OKOnly);
                     return;
                 }
 
+                // Loop para mover todos
                 foreach (var drawable in selectedDrawables)
                 {
                     MainWindow.AddonManager.MoveDrawable(drawable, addon);
                 }
 
                 MainWindow.AddonManager.Addons.Sort(true);
+                MyListBox.SelectedItems.Clear(); // Limpa seleção para evitar erros visuais
             }
         }
 
@@ -464,97 +471,105 @@ namespace buenoClothTool.Controls
 
         private void DeleteDrawable_Click(object sender, RoutedEventArgs e)
         {
-            var selectedDrawables = MainWindow.AddonManager.SelectedAddon.SelectedDrawables.ToList();
-            MainWindow.AddonManager.DeleteDrawables(selectedDrawables);
+            var selectedDrawables = GetSelectedDrawables();
+
+            if (selectedDrawables.Count == 0) return;
+
+            string msg = selectedDrawables.Count == 1
+                ? $"Are you sure you want to delete '{selectedDrawables[0].Name}'?"
+                : $"Are you sure you want to delete these {selectedDrawables.Count} items?";
+
+            var result = Show(msg, "Confirm Delete", CustomMessageBoxButtons.OKCancel, CustomMessageBoxIcon.Warning);
+
+            if (result == CustomMessageBoxResult.OK)
+            {
+                // Chama o método otimizado de delete em massa que criamos na v1.1.0
+                MainWindow.AddonManager.DeleteDrawables(selectedDrawables);
+            }
         }
 
         private void DuplicateToOppositeGender_Click(object sender, RoutedEventArgs e)
         {
-            if (DrawableListSelectedValue is not GDrawable drawable)
-                return;
+            var selectedDrawables = GetSelectedDrawables();
+            if (selectedDrawables.Count == 0) return;
 
-            var oppositeGender = drawable.Sex == Enums.SexType.male ? Enums.SexType.female : Enums.SexType.male;
+            int successCount = 0;
 
-            try
+            foreach (var drawable in selectedDrawables)
             {
-                var newTextures = new ObservableCollection<GTexture>();
-                foreach (var texture in drawable.Textures)
+                var oppositeGender = drawable.Sex == Enums.SexType.male ? Enums.SexType.female : Enums.SexType.male;
+
+                try
                 {
-                    var newTexture = new GTexture(
-                        Guid.Empty,
-                        texture.FilePath,
-                        texture.TypeNumeric,
-                        texture.Number,
-                        texture.TxtNumber,
-                        texture.HasSkin,
-                        texture.IsProp
-                    )
+                    // Clona as texturas
+                    var newTextures = new ObservableCollection<GTexture>();
+                    foreach (var texture in drawable.Textures)
                     {
-                        IsOptimizedDuringBuild = texture.IsOptimizedDuringBuild
+                        var newTexture = new GTexture(Guid.Empty, texture.FilePath, texture.TypeNumeric, texture.Number, texture.TxtNumber, texture.HasSkin, texture.IsProp)
+                        {
+                            IsOptimizedDuringBuild = texture.IsOptimizedDuringBuild
+                        };
+
+                        // Copia configurações de otimização se existirem
+                        if (texture.IsOptimizedDuringBuild && texture.OptimizeDetails != null)
+                        {
+                            newTexture.OptimizeDetails = new GTextureDetails
+                            {
+                                Width = texture.OptimizeDetails.Width,
+                                Height = texture.OptimizeDetails.Height,
+                                MipMapCount = texture.OptimizeDetails.MipMapCount,
+                                Compression = texture.OptimizeDetails.Compression,
+                                Name = texture.OptimizeDetails.Name,
+                                IsOptimizeNeeded = texture.OptimizeDetails.IsOptimizeNeeded,
+                                IsOptimizeNeededTooltip = texture.OptimizeDetails.IsOptimizeNeededTooltip
+                            };
+                        }
+                        newTexture.LoadThumbnailAsync();
+                        newTextures.Add(newTexture);
+                    }
+
+                    // Cria a nova roupa
+                    var newDrawable = new GDrawable(Guid.NewGuid(), drawable.FilePath, oppositeGender, drawable.IsProp, drawable.TypeNumeric, 0, drawable.HasSkin, newTextures, drawable.OriginalFilePath)
+                    {
+                        Audio = drawable.Audio,
+                        EnableHighHeels = drawable.EnableHighHeels,
+                        HighHeelsValue = drawable.HighHeelsValue,
+                        EnableHairScale = drawable.EnableHairScale,
+                        HairScaleValue = drawable.HairScaleValue,
+                        EnableKeepPreview = drawable.EnableKeepPreview,
+                        RenderFlag = drawable.RenderFlag,
+                        FirstPersonPath = drawable.FirstPersonPath,
+                        ClothPhysicsPath = drawable.ClothPhysicsPath
                     };
 
-                    if (texture.IsOptimizedDuringBuild && texture.OptimizeDetails != null)
+                    newDrawable.SelectedFlags.Clear();
+                    foreach (var flag in drawable.SelectedFlags)
                     {
-                        newTexture.OptimizeDetails = new GTextureDetails
-                        {
-                            Width = texture.OptimizeDetails.Width,
-                            Height = texture.OptimizeDetails.Height,
-                            MipMapCount = texture.OptimizeDetails.MipMapCount,
-                            Compression = texture.OptimizeDetails.Compression,
-                            Name = texture.OptimizeDetails.Name,
-                            IsOptimizeNeeded = texture.OptimizeDetails.IsOptimizeNeeded,
-                            IsOptimizeNeededTooltip = texture.OptimizeDetails.IsOptimizeNeededTooltip
-                        };
+                        newDrawable.SelectedFlags.Add(new SelectableItem(flag.Text, flag.Value, flag.IsSelected));
                     }
-                    newTexture.LoadThumbnailAsync();
-                    newTextures.Add(newTexture);
+
+                    MainWindow.AddonManager.AddDrawable(newDrawable);
+                    successCount++;
                 }
-
-                var newDrawable = new GDrawable(
-                    Guid.NewGuid(),
-                    drawable.FilePath,
-                    oppositeGender,
-                    drawable.IsProp,
-                    drawable.TypeNumeric,
-                    0, // Number will be assigned by AddDrawable
-                    drawable.HasSkin,
-                    newTextures
-                )
+                catch (Exception ex)
                 {
-                    Audio = drawable.Audio,
-                    EnableHighHeels = drawable.EnableHighHeels,
-                    HighHeelsValue = drawable.HighHeelsValue,
-                    EnableHairScale = drawable.EnableHairScale,
-                    HairScaleValue = drawable.HairScaleValue,
-                    EnableKeepPreview = drawable.EnableKeepPreview,
-                    RenderFlag = drawable.RenderFlag,
-                    FirstPersonPath = drawable.FirstPersonPath,
-                    ClothPhysicsPath = drawable.ClothPhysicsPath
-                };
-
-                newDrawable.SelectedFlags.Clear();
-                foreach (var flag in drawable.SelectedFlags)
-                {
-                    newDrawable.SelectedFlags.Add(new SelectableItem(flag.Text, flag.Value, flag.IsSelected));
+                    LogHelper.Log($"Error duplicating drawable {drawable.Name}: {ex.Message}", Views.LogType.Error);
                 }
-
-                MainWindow.AddonManager.AddDrawable(newDrawable);
-                MainWindow.AddonManager.Addons.Sort(true);
-                
-                SaveHelper.SetUnsavedChanges(true);
-                LogHelper.Log($"Duplicated drawable '{drawable.Name}' to opposite gender ({oppositeGender}) - new drawable is {newDrawable.Name}");
             }
-            catch (Exception ex)
+
+            if (successCount > 0)
             {
-                LogHelper.Log($"Error duplicating drawable to opposite gender: {ex.Message}", Views.LogType.Error);
-                Show($"Failed to duplicate drawable: {ex.Message}", "Error", CustomMessageBoxButtons.OKOnly, CustomMessageBoxIcon.Error);
+                MainWindow.AddonManager.Addons.Sort(true);
+                SaveHelper.SetUnsavedChanges(true);
+                LogHelper.Log($"Batch duplicated {successCount} items to opposite gender.");
             }
         }
 
-
         private async void ReplaceDrawable_Click(object sender, RoutedEventArgs e)
         {
+            // Replace continua sendo individual por segurança
             var drawable = DrawableListSelectedValue as GDrawable;
+            if (drawable == null) return;
 
             OpenFileDialog files = new()
             {
@@ -567,11 +582,11 @@ namespace buenoClothTool.Controls
             {
                 try
                 {
-                    // Copy new file to project assets with the drawable's existing GUID
                     var newRelativePath = await FileHelper.CopyToProjectAssetsAsync(files.FileName, drawable.Id.ToString());
                     drawable.FilePath = newRelativePath;
-                    SaveHelper.SetUnsavedChanges(true);
+                    drawable.OriginalFilePath = files.FileName; // Atualiza a origem também!
 
+                    SaveHelper.SetUnsavedChanges(true);
                     CWHelper.SendDrawableUpdateToPreview(e);
                     LogHelper.Log($"Replaced drawable '{drawable.Name}' with new file", Views.LogType.Info);
                 }
@@ -583,10 +598,10 @@ namespace buenoClothTool.Controls
             }
         }
 
-
         private async void ExportDrawable_Click(object sender, RoutedEventArgs e)
         {
-            var selectedDrawables = MainWindow.AddonManager.SelectedAddon.SelectedDrawables.ToList();
+            var selectedDrawables = GetSelectedDrawables();
+            if (selectedDrawables.Count == 0) return;
 
             MenuItem menuItem = sender as MenuItem;
             var tag = menuItem?.Tag?.ToString();
@@ -595,22 +610,20 @@ namespace buenoClothTool.Controls
             {
                 Title = tag switch
                 {
-                    "DDS" or "PNG" => $"Select the folder to export textures as {tag}",
-                    "YTD" => "Select the folder to export drawable with textures",
-                    _ => "Select the folder to export drawable"
+                    "DDS" or "PNG" => $"Select folder to export textures ({selectedDrawables.Count} items)",
+                    "YTD" => $"Select folder to export drawables + textures ({selectedDrawables.Count} items)",
+                    _ => $"Select folder to export drawables ({selectedDrawables.Count} items)"
                 },
                 Multiselect = false
             };
 
-            if (folder.ShowDialog() != true)
-            {
-                return;
-            }
+            if (folder.ShowDialog() != true) return;
 
             string folderPath = folder.FolderName;
 
             try
             {
+                // Exporta Texturas
                 if (!string.IsNullOrEmpty(tag) && (tag == "YTD" || tag == "PNG" || tag == "DDS"))
                 {
                     foreach (var drawable in selectedDrawables)
@@ -618,13 +631,13 @@ namespace buenoClothTool.Controls
                         await Task.Run(() => FileHelper.SaveTexturesAsync(new List<GTexture>(drawable.Textures), folderPath, tag).ConfigureAwait(false));
                     }
 
-                    if (tag == "DDS" || tag == "PNG")
-                    {
-                        return;
-                    }
+                    if (tag == "DDS" || tag == "PNG") return;
                 }
 
+                // Exporta YDDs
                 await FileHelper.SaveDrawablesAsync(selectedDrawables, folderPath).ConfigureAwait(false);
+
+                Show($"Successfully exported {selectedDrawables.Count} items.", "Success", CustomMessageBoxButtons.OKOnly);
             }
             catch (Exception ex)
             {
